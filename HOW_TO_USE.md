@@ -41,16 +41,37 @@ The default app URL is:
 http://localhost:5290
 ```
 
+Runtime settings are read from environment variables. For local development, copy:
+
+```bash
+cp .env.example .env
+```
+
+For the `samagama.in` SSH deployment, copy:
+
+```bash
+cp .env.ssh.example .env
+```
+
+The `.env` file is intentionally ignored by Git, so each machine can keep its own port and MongoDB without changing committed code.
+
+On production, direct student search should stay disabled:
+
+```bash
+ALLOW_STUDENT_SEARCH=false
+```
+
+Students should enter Spurti from Samagama using a signed link to `/spurti/auth?token=...`. Samagama and Spurti must share the same `SPURTI_AUTH_SECRET`.
+
 ## Folder Structure
 
 ```text
-Summership/
-  client/                 React frontend
-  server/                 Express + MongoDB backend
-  data/
-    students.json         Seed data used to recreate student records
-    uploads/              Raw attendance/chat files kept for reference and re-ingestion
-  package.json            Backend/app scripts
+client/                 React frontend
+server/                 Express + MongoDB backend
+data/
+  students.json         Seed data used to recreate student records
+  uploads/              Raw attendance/chat files kept for reference and re-ingestion
+package.json            Backend/app scripts
 ```
 
 ## Setup After Cloning
@@ -58,7 +79,6 @@ Summership/
 From the cloned repo:
 
 ```bash
-cd Summership
 npm run setup
 ```
 
@@ -68,7 +88,7 @@ Make sure MongoDB is running before running setup or starting the app.
 
 ## Load The Same Data Into Local MongoDB
 
-Run this from `Summership`:
+Run this from the repo root:
 
 ```bash
 npm run rebuild
@@ -77,7 +97,7 @@ npm run rebuild
 This reads:
 
 ```text
-data/students-start-on-or-before-2026-05-21.csv
+data/students-start-on-or-before-2026-05-22.csv
 data/uploads/
 ```
 
@@ -245,14 +265,13 @@ After new data is added, the app should ingest it into MongoDB and then use Mong
 If the app opens but no records show:
 
 1. Check MongoDB is running.
-2. Run `npm run seed` again from `Summership`.
+2. Run `npm run seed` again from the repo root.
 3. Restart the app with `npm start`.
 
 If port `5290` is busy:
 
 ```bash
-$env:PORT=5292
-npm start
+PORT=5292 npm start
 ```
 
 Then open:
@@ -264,6 +283,5 @@ http://localhost:5292
 If MongoDB is on another URL:
 
 ```bash
-$env:MONGO_URI="mongodb://127.0.0.1:27017/analysis_summership"
-npm start
+MONGO_URI="mongodb://127.0.0.1:27017/analysis_summership" npm start
 ```

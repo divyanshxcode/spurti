@@ -1,5 +1,10 @@
-export const PORT = Number(process.env.PORT || 5003);
-export const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/sakshi_spurti';
+import 'dotenv/config';
+
+export const PORT = Number(process.env.PORT || 5290);
+export const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/analysis_summership';
+export const ALLOW_STUDENT_SEARCH = process.env.ALLOW_STUDENT_SEARCH !== 'false';
+export const SPURTI_AUTH_SECRET = process.env.SPURTI_AUTH_SECRET || '';
+export const SPURTI_COOKIE_SECURE = process.env.SPURTI_COOKIE_SECURE === 'true';
 
 export const SESSION_LABELS = [
   '15 May Morning',

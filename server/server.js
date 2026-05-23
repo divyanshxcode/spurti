@@ -3,9 +3,10 @@ import cors from 'cors';
 import mongoose from 'mongoose';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 
-import { MONGO_URI, PORT } from './config.js';
+import { ALLOW_STUDENT_SEARCH, MONGO_URI, PORT, SPURTI_AUTH_SECRET, SPURTI_COOKIE_SECURE } from './config.js';
 import Student from './models/Student.js';
 import Session from './models/Session.js';
 import AttendanceRecord from './models/AttendanceRecord.js';
@@ -19,6 +20,7 @@ const rootDir = path.resolve(__dirname, '..');
 const clientDist = path.join(rootDir, 'client', 'dist');
 const ADMIN_EMAIL = normalizeEmail(process.env.ADMIN_EMAIL || 'dled@iitrpr.ac.in');
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'vled-local-admin';
+const STUDENT_COOKIE = 'spurti_student';
 
 const app = express();
 const api = express.Router();
@@ -47,6 +49,54 @@ function publicStudent(student) {
     maskedAlternateEmail: student.alternateEmail ? maskEmail(student.alternateEmail) : '',
     totalSp: student.totalSp
   };
+}
+
+function parseCookies(header = '') {
+  return Object.fromEntries(String(header).split(';').map(part => {
+    const index = part.indexOf('=');
+    if (index < 0) return null;
+    return [part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1).trim())];
+  }).filter(Boolean));
+}
+
+function signValue(value) {
+  return crypto.createHmac('sha256', SPURTI_AUTH_SECRET).update(value).digest('base64url');
+}
+
+function verifySignedToken(token) {
+  if (!SPURTI_AUTH_SECRET) return null;
+  const [body, signature] = String(token || '').split('.');
+  if (!body || !signature) return null;
+  const expected = signValue(body);
+  const left = Buffer.from(signature);
+  const right = Buffer.from(expected);
+  if (left.length !== right.length || !crypto.timingSafeEqual(left, right)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (!payload.email || !payload.exp || Date.now() > Number(payload.exp)) return null;
+    return { email: normalizeEmail(payload.email) };
+  } catch {
+    return null;
+  }
+}
+
+function setStudentCookie(res, email) {
+  const body = Buffer.from(JSON.stringify({
+    email: normalizeEmail(email),
+    exp: Date.now() + 24 * 60 * 60 * 1000
+  })).toString('base64url');
+  const value = `${body}.${signValue(body)}`;
+  const secure = SPURTI_COOKIE_SECURE ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${STUDENT_COOKIE}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400${secure}`);
+}
+
+function clearStudentCookie(res) {
+  res.setHeader('Set-Cookie', `${STUDENT_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+}
+
+function studentFromCookie(req) {
+  const cookies = parseCookies(req.headers.cookie || '');
+  return verifySignedToken(cookies[STUDENT_COOKIE]);
 }
 
 async function rankFor(email) {
@@ -125,7 +175,30 @@ function adminGuard(req, res, next) {
 
 api.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
+api.get('/config', (_req, res) => res.json({ allowStudentSearch: ALLOW_STUDENT_SEARCH }));
+
+api.get('/auth', async (req, res) => {
+  const verified = verifySignedToken(req.query.token);
+  if (!verified) return res.status(401).send('Invalid or expired Spurti login link.');
+  const student = await Student.findOne({ $or: [{ email: verified.email }, { alternateEmail: verified.email }] }).lean();
+  if (!student) return res.status(404).send('No Spurti record was found for this Samagama account.');
+  setStudentCookie(res, student.email);
+  res.redirect(req.baseUrl || '/');
+});
+
+api.get('/me', async (req, res) => {
+  const verified = studentFromCookie(req);
+  if (!verified) return res.status(401).json({ authenticated: false });
+  const student = await Student.findOne({ email: verified.email }).lean();
+  if (!student) {
+    clearStudentCookie(res);
+    return res.status(404).json({ authenticated: false, error: 'Student not found' });
+  }
+  res.json({ authenticated: true, profile: await studentPayload(student) });
+});
+
 api.get('/search', async (req, res) => {
+  if (!ALLOW_STUDENT_SEARCH) return res.status(403).json({ error: 'Student search is disabled. Please login from Samagama to view your Spurti Points.' });
   const q = String(req.query.q || '').trim();
   if (q.length < 2) return res.json({ exact: false, matches: [] });
 
@@ -148,6 +221,7 @@ api.get('/search', async (req, res) => {
 });
 
 api.post('/confirm', async (req, res) => {
+  if (!ALLOW_STUDENT_SEARCH) return res.status(403).json({ error: 'Student search is disabled. Please login from Samagama to view your Spurti Points.' });
   const { studentId, email } = req.body || {};
   const typed = normalizeEmail(email);
   const student = await Student.findById(studentId).lean();

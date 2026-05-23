@@ -9,6 +9,8 @@ function App() {
   const [profile, setProfile] = useState(null);
   const [admin, setAdmin] = useState(null);
   const [adminAuth, setAdminAuth] = useState(null);
+  const [config, setConfig] = useState({ allowStudentSearch: true });
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!profile?.student) return;
@@ -27,8 +29,38 @@ function App() {
     return () => clearInterval(id);
   }, [profile]);
 
+  useEffect(() => {
+    let active = true;
+    async function bootstrap() {
+      try {
+        const configRes = await fetch(`${API}/config`);
+        const nextConfig = configRes.ok ? await configRes.json() : { allowStudentSearch: true };
+        if (!active) return;
+        setConfig(nextConfig);
+
+        if (view !== 'admin-login') {
+          const meRes = await fetch(`${API}/me`);
+          if (meRes.ok) {
+            const data = await meRes.json();
+            if (data.authenticated && data.profile && active) {
+              setProfile(data.profile);
+              setView('student');
+            }
+          }
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+    bootstrap();
+    return () => { active = false; };
+  }, []);
+
+  if (loading) {
+    return <main className="page login-page"><section className="panel auth-card"><p className="eyebrow">Spurti</p><h1>Loading</h1></section></main>;
+  }
   if (view === 'student' && profile) {
-    return <StudentView profile={profile} onBack={() => setView('landing')} />;
+    return <StudentView profile={profile} onBack={config.allowStudentSearch ? () => setView('landing') : null} />;
   }
   if (view === 'admin-login') {
     return <AdminLogin onAdmin={(data, auth) => { setAdmin(data); setAdminAuth(auth); setView('admin'); }} onBack={() => setView('landing')} />;
@@ -36,10 +68,10 @@ function App() {
   if (view === 'admin' && admin && adminAuth) {
     return <AdminView admin={admin} auth={adminAuth} onBack={() => setView('landing')} />;
   }
-  return <Landing onStudent={(data) => { setProfile(data); setView('student'); }} />;
+  return <Landing config={config} onStudent={(data) => { setProfile(data); setView('student'); }} />;
 }
 
-function Landing({ onStudent }) {
+function Landing({ config, onStudent }) {
   const [searchOpen, setSearchOpen] = useState(false);
 
   return (
@@ -54,10 +86,18 @@ function Landing({ onStudent }) {
             <Info title="How to get points" text="Attend eligible sessions, answer polls, and contribute positive or useful messages in the meeting chat." />
             <Info title="Motive" text="To make consistency visible and help the cohort build disciplined learning habits." />
           </div>
-          <button className="primary" onClick={() => setSearchOpen(true)}>Find your Spurti points</button>
+          {config.allowStudentSearch ? (
+            <button className="primary" onClick={() => setSearchOpen(true)}>Find your Spurti points</button>
+          ) : (
+            <div className="auth-card inline-auth">
+              <h2>Please login from Samagama to view your Spurti Points.</h2>
+              <p className="muted">Open Spurti from your Samagama dashboard using the SP details button.</p>
+              <a className="primary link-button" href="/">Go to Samagama Login</a>
+            </div>
+          )}
         </div>
       </section>
-      {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} onStudent={onStudent} />}
+      {config.allowStudentSearch && searchOpen && <SearchModal onClose={() => setSearchOpen(false)} onStudent={onStudent} />}
     </main>
   );
 }
@@ -178,7 +218,7 @@ function StudentView({ profile, onBack }) {
   return (
     <main className="page compact">
       <header className="topbar">
-        <button className="secondary" onClick={onBack}>Back</button>
+        {onBack ? <button className="secondary" onClick={onBack}>Back</button> : <span />}
         <div>
           <p className="eyebrow">Student Spurti Bank</p>
           <h1>{student.name}</h1>

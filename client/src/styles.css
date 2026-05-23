@@ -47,6 +47,21 @@ button { cursor: pointer; }
 .login-page { display: grid; place-items: center; }
 .login-card { position: static; }
 .login-form { display: grid; gap: 12px; margin-top: 16px; }
+.auth-card { padding: 28px; }
+.inline-auth {
+  margin-top: 24px;
+  max-width: 560px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfdff;
+}
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  text-decoration: none;
+}
 .eyebrow {
   margin: 0 0 10px;
   font-size: 12px;

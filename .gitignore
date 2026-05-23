@@ -2,6 +2,8 @@ node_modules/
 dist/
 .env
 .env.*
+!.env.example
+!.env.ssh.example
 .DS_Store
 npm-debug.log*
 yarn-debug.log*
