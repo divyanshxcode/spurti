@@ -14,6 +14,8 @@ import ChatRecord from './models/ChatRecord.js';
 import PollRecord from './models/PollRecord.js';
 import SPTransaction from './models/SPTransaction.js';
 import SessionEvent from './models/SessionEvent.js';
+import ChatSPReview from './models/ChatSPReview.js';
+import { recalculateStudentSp } from './scripts/lib/ingestion.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -47,6 +49,7 @@ function publicStudent(student) {
     name: student.name,
     maskedEmail: maskEmail(student.email),
     maskedAlternateEmail: student.alternateEmail ? maskEmail(student.alternateEmail) : '',
+    status: student.status || 'active',
     totalSp: student.totalSp
   };
 }
@@ -101,27 +104,37 @@ function studentFromCookie(req) {
 
 async function rankFor(email) {
   const student = await Student.findOne({ email }).lean();
-  if (!student) return null;
+  if (!student || student.status === 'excused') return null;
   const better = await Student.countDocuments({
+    status: { $ne: 'excused' },
     $or: [
       { totalSp: { $gt: student.totalSp } },
       { totalSp: student.totalSp, name: { $lt: student.name } }
     ]
   });
-  const cohortSize = await Student.countDocuments();
+  const cohortSize = await Student.countDocuments({ status: { $ne: 'excused' } });
   return { rank: better + 1, cohortSize };
+}
+
+function excusedPayload(student) {
+  return {
+    excused: true,
+    student: publicStudent(student),
+    message: 'Your current internship account has been excused. Your previous Spurti record is preserved, and you may come back in the next cohort.'
+  };
 }
 
 async function studentPayload(student) {
   const email = student.email;
+  const activeFilter = { status: { $ne: 'excused' } };
   const [transactions, chats, polls, attendance, rankInfo, leaderboard, allStudents] = await Promise.all([
     SPTransaction.find({ email }).sort({ dateTime: 1, createdAt: 1 }).lean(),
     ChatRecord.find({ email }).sort({ sessionLabel: 1 }).lean(),
     PollRecord.find({ email }).sort({ sessionLabel: 1 }).lean(),
     AttendanceRecord.find({ email }).sort({ sessionLabel: 1 }).lean(),
     rankFor(email),
-    Student.find().sort({ totalSp: -1, name: 1 }).limit(50).lean(),
-    Student.find().sort({ totalSp: -1, name: 1 }).lean()
+    Student.find(activeFilter).sort({ totalSp: -1, name: 1 }).limit(50).lean(),
+    Student.find(activeFilter).sort({ totalSp: -1, name: 1 }).lean()
   ]);
   const allSp = allStudents.map(s => Number(s.totalSp || 0));
   const averageSp = allSp.length ? Math.round(allSp.reduce((sum, value) => sum + value, 0) / allSp.length) : 0;
@@ -137,6 +150,9 @@ async function studentPayload(student) {
       alternateEmail: student.alternateEmail,
       internshipStartDate: student.internshipStartDate,
       internshipEndDate: student.internshipEndDate,
+      status: student.status || 'active',
+      excusedAt: student.excusedAt,
+      excusedReason: student.excusedReason,
       totalSp: student.totalSp,
       rank: rankInfo?.rank || null,
       cohortSize: rankInfo?.cohortSize || null
@@ -177,14 +193,17 @@ api.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
 api.get('/config', (_req, res) => res.json({ allowStudentSearch: ALLOW_STUDENT_SEARCH }));
 
-api.get('/auth', async (req, res) => {
+async function authHandoff(req, res) {
   const verified = verifySignedToken(req.query.token);
   if (!verified) return res.status(401).send('Invalid or expired Spurti login link.');
   const student = await Student.findOne({ $or: [{ email: verified.email }, { alternateEmail: verified.email }] }).lean();
   if (!student) return res.status(404).send('No Spurti record was found for this Samagama account.');
+  if (student.status === 'excused') return res.status(403).send('Your current internship account has been excused. Your previous Spurti record is preserved, and you may come back in the next cohort.');
   setStudentCookie(res, student.email);
-  res.redirect(req.baseUrl || '/');
-});
+  res.redirect(req.path.startsWith('/spurti') || req.baseUrl.startsWith('/spurti') ? '/spurti/' : '/');
+}
+
+api.get('/auth', authHandoff);
 
 api.get('/me', async (req, res) => {
   const verified = studentFromCookie(req);
@@ -194,6 +213,7 @@ api.get('/me', async (req, res) => {
     clearStudentCookie(res);
     return res.status(404).json({ authenticated: false, error: 'Student not found' });
   }
+  if (student.status === 'excused') return res.json({ authenticated: true, ...excusedPayload(student) });
   res.json({ authenticated: true, profile: await studentPayload(student) });
 });
 
@@ -205,6 +225,7 @@ api.get('/search', async (req, res) => {
   if (q.includes('@')) {
     const email = normalizeEmail(q);
     const student = await Student.findOne({ $or: [{ email }, { alternateEmail: email }] }).lean();
+    if (student?.status === 'excused') return res.json(excusedPayload(student));
     if (student) return res.json({ exact: true, profile: await studentPayload(student) });
   }
 
@@ -229,11 +250,12 @@ api.post('/confirm', async (req, res) => {
   if (typed !== normalizeEmail(student.email) && typed !== normalizeEmail(student.alternateEmail)) {
     return res.status(403).json({ error: 'Email did not match this record' });
   }
+  if (student.status === 'excused') return res.json(excusedPayload(student));
   res.json(await studentPayload(student));
 });
 
 api.get('/leaderboard', async (_req, res) => {
-  const students = await Student.find().sort({ totalSp: -1, name: 1 }).limit(50).lean();
+  const students = await Student.find({ status: { $ne: 'excused' } }).sort({ totalSp: -1, name: 1 }).limit(50).lean();
   res.json(students.map((s, i) => ({ rank: i + 1, name: s.name, maskedEmail: maskEmail(s.email), totalSp: s.totalSp })));
 });
 
@@ -247,17 +269,18 @@ api.post('/ping', async (req, res) => {
 });
 
 api.get('/admin/stats', adminGuard, async (_req, res) => {
-  const [students, sessions, txns] = await Promise.all([
-    Student.countDocuments(),
+  const [students, excusedStudents, sessions, txns] = await Promise.all([
+    Student.countDocuments({ status: { $ne: 'excused' } }),
+    Student.countDocuments({ status: 'excused' }),
     Session.find().sort({ endDateTime: 1 }).lean(),
     SPTransaction.countDocuments()
   ]);
-  res.json({ students, sessions, transactions: txns });
+  res.json({ students, excusedStudents, sessions, transactions: txns });
 });
 
 api.get('/admin/leaderboard', adminGuard, async (req, res) => {
   const limit = Math.min(500, Math.max(1, Number(req.query.limit || 50)));
-  const students = await Student.find().sort({ totalSp: -1, name: 1 }).limit(limit).lean();
+  const students = await Student.find({ status: { $ne: 'excused' } }).sort({ totalSp: -1, name: 1 }).limit(limit).lean();
   res.json(students.map((s, i) => ({
     rank: i + 1,
     _id: String(s._id),
@@ -270,7 +293,7 @@ api.get('/admin/leaderboard', adminGuard, async (req, res) => {
 api.get('/admin/attendance', adminGuard, async (_req, res) => {
   const [sessions, students, records] = await Promise.all([
     Session.find().sort({ endDateTime: 1 }).lean(),
-    Student.find().sort({ name: 1 }).lean(),
+    Student.find({ status: { $ne: 'excused' } }).sort({ name: 1 }).lean(),
     AttendanceRecord.find().lean()
   ]);
   const byStudent = new Map();
@@ -301,6 +324,66 @@ api.get('/admin/student/:id', adminGuard, async (req, res) => {
   res.json(await studentPayload(student));
 });
 
+api.get('/admin/chat-sp-reviews', adminGuard, async (req, res) => {
+  const status = String(req.query.status || 'pending');
+  const query = status === 'all' ? {} : { status };
+  const reviews = await ChatSPReview.find(query).sort({ dateTime: 1, createdAt: 1 }).limit(500).lean();
+  res.json(reviews);
+});
+
+api.post('/admin/chat-sp-reviews/:id/reject', adminGuard, async (req, res) => {
+  const review = await ChatSPReview.findById(req.params.id);
+  if (!review) return res.status(404).json({ error: 'Review not found' });
+  if (review.status !== 'pending') return res.status(409).json({ error: `Review is already ${review.status}` });
+  review.status = 'rejected';
+  review.reviewedBy = normalizeEmail(req.headers['x-admin-email']);
+  review.reviewedAt = new Date();
+  await review.save();
+  res.json(review);
+});
+
+api.post('/admin/chat-sp-reviews/:id/accept', adminGuard, async (req, res) => {
+  const review = await ChatSPReview.findById(req.params.id);
+  if (!review) return res.status(404).json({ error: 'Review not found' });
+  if (review.status !== 'pending') return res.status(409).json({ error: `Review is already ${review.status}` });
+
+  const email = normalizeEmail(req.body?.studentEmail || review.studentEmail);
+  const delta = Number(req.body?.delta ?? review.delta);
+  const reason = String(req.body?.reason || review.reason || '').trim();
+  if (!email || !email.includes('@')) return res.status(400).json({ error: 'A matched student email is required before accepting.' });
+  if (!Number.isFinite(delta) || delta === 0) return res.status(400).json({ error: 'A non-zero SP delta is required.' });
+
+  const student = await Student.findOne({ email });
+  if (!student) return res.status(404).json({ error: 'Student not found' });
+  if (student.status === 'excused') return res.status(409).json({ error: 'Cannot apply new SP to an excused student.' });
+
+  const last = await SPTransaction.findOne({ email }).sort({ dateTime: -1, createdAt: -1 }).lean();
+  const transaction = await SPTransaction.create({
+    email,
+    studentId: student._id,
+    category: 'chat_manual_award',
+    sessionLabel: review.sessionLabel,
+    deltaMode: 'absolute',
+    deltaValue: delta,
+    appliedDelta: delta,
+    balanceAfter: Number(last?.balanceAfter ?? student.totalSp ?? 0) + delta,
+    reason: reason || `Manual chat SP by ${review.issuedByName}.`,
+    dateTime: review.dateTime
+  });
+
+  review.status = 'accepted';
+  review.reviewedBy = normalizeEmail(req.headers['x-admin-email']);
+  review.reviewedAt = new Date();
+  review.studentEmail = email;
+  review.studentId = student._id;
+  review.delta = delta;
+  review.reason = reason || review.reason;
+  review.transactionId = transaction._id;
+  await review.save();
+  await recalculateStudentSp(email);
+  res.json({ review, transaction });
+});
+
 api.get('/admin/active', adminGuard, (_req, res) => {
   const now = new Date();
   const cutoff = now.getTime() - 60_000;
@@ -327,14 +410,18 @@ api.get('/admin/analytics', adminGuard, async (_req, res) => {
   const last30Days = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
   const [students, sessions, attendance, transactions, events] = await Promise.all([
-    Student.find().lean(),
+    Student.find({ status: { $ne: 'excused' } }).lean(),
     Session.find().sort({ endDateTime: 1 }).lean(),
     AttendanceRecord.find().lean(),
     SPTransaction.find().lean(),
     SessionEvent.find({ timestamp: { $gte: last30Days } }).lean()
   ]);
+  const activeEmails = new Set(students.map(student => student.email));
+  const activeAttendance = attendance.filter(row => activeEmails.has(row.email));
+  const activeTransactions = transactions.filter(row => activeEmails.has(row.email));
+  const activeEvents = events.filter(row => activeEmails.has(row.email));
 
-  const uniqueSince = (date) => new Set(events.filter(e => e.timestamp >= date).map(e => e.email)).size;
+  const uniqueSince = (date) => new Set(activeEvents.filter(e => e.timestamp >= date).map(e => e.email)).size;
   const bucket = (date, mode) => {
     const d = new Date(date);
     if (mode === 'hour') return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:00`;
@@ -347,7 +434,7 @@ api.get('/admin/analytics', adminGuard, async (_req, res) => {
   };
   const series = (mode, from) => {
     const map = new Map();
-    for (const ev of events.filter(e => e.timestamp >= from)) {
+    for (const ev of activeEvents.filter(e => e.timestamp >= from)) {
       const key = bucket(ev.timestamp, mode);
       if (!map.has(key)) map.set(key, { label: key, events: 0, emails: new Set() });
       const row = map.get(key);
@@ -369,7 +456,7 @@ api.get('/admin/analytics', adminGuard, async (_req, res) => {
   };
 
   const attendanceBySession = sessions.map(session => {
-    const rows = attendance.filter(a => a.sessionLabel === session.label);
+    const rows = activeAttendance.filter(a => a.sessionLabel === session.label);
     const qualified = rows.filter(r => r.qualified).length;
     const totalMinutes = rows.reduce((sum, r) => sum + Number(r.attendedMinutes || 0), 0);
     return {
@@ -384,7 +471,7 @@ api.get('/admin/analytics', adminGuard, async (_req, res) => {
   });
 
   const categoryTotals = ['initial', 'attendance', 'poll', 'chat', 'manual'].map(category => {
-    const rows = transactions.filter(t => t.category === category);
+    const rows = activeTransactions.filter(t => t.category === category);
     return {
       category,
       count: rows.length,
@@ -393,9 +480,9 @@ api.get('/admin/analytics', adminGuard, async (_req, res) => {
       debits: rows.filter(t => t.appliedDelta < 0).length
     };
   });
-  const attendanceDebits = transactions.filter(t => t.category === 'attendance' && t.appliedDelta < 0);
-  const pollDebits = transactions.filter(t => t.category === 'poll' && t.appliedDelta < 0);
-  const inactiveToday = students.length - new Set(events.filter(e => e.timestamp >= todayStart).map(e => e.email)).size;
+  const attendanceDebits = activeTransactions.filter(t => t.category === 'attendance' && t.appliedDelta < 0);
+  const pollDebits = activeTransactions.filter(t => t.category === 'poll' && t.appliedDelta < 0);
+  const inactiveToday = students.length - new Set(activeEvents.filter(e => e.timestamp >= todayStart).map(e => e.email)).size;
   const lowSp = students.filter(s => Number(s.totalSp || 0) < 100).length;
   const topDrops = Object.values(attendanceDebits.concat(pollDebits).reduce((acc, txn) => {
     if (!acc[txn.email]) acc[txn.email] = { email: txn.email, debitCount: 0, debitSp: 0 };
@@ -417,7 +504,7 @@ api.get('/admin/analytics', adminGuard, async (_req, res) => {
     },
     attendance: {
       sessions: attendanceBySession,
-      overallQualifiedPct: attendance.length ? Math.round((attendance.filter(a => a.qualified).length / attendance.length) * 100) : 0
+      overallQualifiedPct: activeAttendance.length ? Math.round((activeAttendance.filter(a => a.qualified).length / activeAttendance.length) * 100) : 0
     },
     sp: {
       students: students.length,
@@ -443,9 +530,13 @@ function last24Hours(now) {
 }
 
 app.use('/api', api);
+app.use('/spurti/api', api);
+app.get('/spurti/auth', authHandoff);
 
 if (fs.existsSync(clientDist)) {
+  app.use('/spurti', express.static(clientDist));
   app.use(express.static(clientDist));
+  app.get('/spurti/*', (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));
   app.get('*', (_req, res) => res.sendFile(path.join(clientDist, 'index.html')));
 } else {
   app.get('*', (_req, res) => res.status(404).send('Build the client first with npm run build.'));

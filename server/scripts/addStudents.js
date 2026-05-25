@@ -135,6 +135,9 @@ async function run() {
       existing.alternateEmail = row.alternateEmail || existing.alternateEmail;
       existing.internshipStartDate = row.internshipStartDate || existing.internshipStartDate;
       existing.internshipEndDate = row.internshipEndDate || existing.internshipEndDate;
+      existing.status = 'active';
+      existing.excusedAt = null;
+      existing.excusedReason = '';
       await existing.save();
       updated++;
       continue;
@@ -146,6 +149,9 @@ async function run() {
       alternateEmail: row.alternateEmail,
       internshipStartDate: row.internshipStartDate,
       internshipEndDate: row.internshipEndDate,
+      status: 'active',
+      excusedAt: null,
+      excusedReason: '',
       totalSp: 100
     });
     inserted++;

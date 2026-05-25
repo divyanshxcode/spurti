@@ -326,6 +326,34 @@ input {
 .bad-cell { background: #fee2e2; color: var(--red); font-weight: 800; }
 .limit-row { display: flex; gap: 8px; align-items: center; }
 .limit-row input { width: 110px; }
+.review-table td { vertical-align: top; }
+.review-table td span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+.review-table td p { margin: 0 0 6px; min-width: 240px; }
+.review-table td em {
+  display: block;
+  max-width: 440px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.4;
+}
+.review-actions {
+  display: flex;
+  gap: 8px;
+}
+.review-actions button {
+  min-height: 34px;
+  padding: 0 10px;
+}
+.review-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .live-summary {
   display: flex;
   gap: 12px;

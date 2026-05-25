@@ -224,6 +224,7 @@ export function parsePoll(filePath) {
 }
 
 export function sessionApplies(student, sessionEnd) {
+  if (student.status === 'excused') return false;
   return sessionEnd >= student.internshipStartDate;
 }
 

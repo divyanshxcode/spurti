@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import { MONGO_URI } from '../config.js';
 import Student from '../models/Student.js';
 import { applySessionForStudents, session } from './lib/ingestion.js';
+import { scanChatSPReviews } from '../services/chatSpReview.js';
 
 function args(argv) {
   const out = {};
@@ -47,15 +48,26 @@ async function run() {
   );
 
   await mongoose.connect(MONGO_URI);
-  const students = await Student.find().sort({ name: 1 });
+  const students = await Student.find({ status: { $ne: 'excused' } }).sort({ name: 1 });
   const stats = {
     studentsConsidered: students.length,
     attendanceBackfilled: 0,
     pollsBackfilled: 0,
     chatsBackfilled: 0,
+    chatSpReviewsCreated: 0,
     skippedExistingTransactions: 0
   };
   await applySessionForStudents(config, students, process.cwd(), stats);
+  if (options.chat) {
+    const reviewStats = await scanChatSPReviews({
+      sessionLabel: config.label,
+      date: config.date,
+      chatFile: config.chatFile,
+      rootDir: process.cwd(),
+      students
+    });
+    stats.chatSpReviewsCreated = reviewStats.createdReviews;
+  }
   console.log(JSON.stringify(stats, null, 2));
   await mongoose.disconnect();
 }

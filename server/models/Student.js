@@ -6,6 +6,9 @@ const studentSchema = new mongoose.Schema({
   alternateEmail: { type: String, lowercase: true, trim: true, default: '', index: true },
   internshipStartDate: { type: Date, required: true, index: true },
   internshipEndDate: { type: Date, default: null },
+  status: { type: String, enum: ['active', 'excused'], default: 'active', index: true },
+  excusedAt: { type: Date, default: null },
+  excusedReason: { type: String, default: '' },
   totalSp: { type: Number, default: 100, index: true }
 }, { timestamps: true });
 

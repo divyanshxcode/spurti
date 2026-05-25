@@ -11,6 +11,7 @@ import ChatRecord from '../models/ChatRecord.js';
 import PollRecord from '../models/PollRecord.js';
 import SPTransaction from '../models/SPTransaction.js';
 import SessionEvent from '../models/SessionEvent.js';
+import ChatSPReview from '../models/ChatSPReview.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..', '..');
@@ -252,7 +253,8 @@ async function run() {
     ChatRecord.deleteMany({}),
     PollRecord.deleteMany({}),
     SPTransaction.deleteMany({}),
-    SessionEvent.deleteMany({})
+    SessionEvent.deleteMany({}),
+    ChatSPReview.deleteMany({})
   ]);
 
   const roster = parseRoster();

@@ -47,6 +47,8 @@ async function run() {
     pollsBackfilled: 0,
     chatsBackfilled: 0,
     skippedExistingTransactions: 0,
+    excused: 0,
+    reactivated: 0,
     errors: []
   };
   const syncedIds = new Set();
@@ -69,6 +71,10 @@ async function run() {
       existing.alternateEmail = row.alternateEmail || existing.alternateEmail;
       existing.internshipStartDate = row.internshipStartDate || existing.internshipStartDate;
       existing.internshipEndDate = row.internshipEndDate || existing.internshipEndDate;
+      if (existing.status === 'excused') stats.reactivated++;
+      existing.status = 'active';
+      existing.excusedAt = null;
+      existing.excusedReason = '';
       await existing.save();
       syncedIds.add(String(existing._id));
       stats.updated++;
@@ -81,12 +87,28 @@ async function run() {
       alternateEmail: normalizeEmail(row.alternateEmail),
       internshipStartDate: row.internshipStartDate,
       internshipEndDate: row.internshipEndDate,
+      status: 'active',
+      excusedAt: null,
+      excusedReason: '',
       totalSp: 100
     });
     await ensureInitialTransaction(student, stats);
     syncedIds.add(String(student._id));
     stats.inserted++;
   }
+
+  const excusedAt = new Date();
+  const excusedResult = await Student.updateMany(
+    { _id: { $nin: [...syncedIds] }, status: { $ne: 'excused' } },
+    {
+      $set: {
+        status: 'excused',
+        excusedAt,
+        excusedReason: `Not present in synced roster ${path.basename(csvArg)}`
+      }
+    }
+  );
+  stats.excused = excusedResult.modifiedCount || 0;
 
   const syncedStudents = await Student.find({ _id: { $in: [...syncedIds] } }).sort({ name: 1 });
   for (const config of KNOWN_SESSIONS) {

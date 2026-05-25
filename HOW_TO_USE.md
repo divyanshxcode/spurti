@@ -131,6 +131,14 @@ npm run sync-students -- path/to/new-student-list.csv
 
 This does everything `add-students` does, then safely backfills known historical sessions for the synced students only. It skips sessions before each student's internship start date and skips transactions that already exist, so it is safe to rerun.
 
+Students already in MongoDB but missing from the latest synced CSV are not deleted. They are marked `excused`, keep their old SP bank/chats/polls/attendance, and are excluded from active cohort rankings, leaderboards, future session ingestion, and cohort analytics. If an excused student appears in a later roster, `sync-students` reactivates them.
+
+For the checked-in 25 May roster, the command is:
+
+```bash
+npm run sync-students -- data/students-start-on-or-before-2026-05-25.csv
+```
+
 ## Ingest A New Daily Session
 
 When you receive a new attendance/chat/poll file for a day, put the files under `data/uploads/YYYY-MM-DD/`, then run:
@@ -147,6 +155,24 @@ npm run ingest-session -- \
 ```
 
 Only `--label` and `--date` are always required. Provide at least one of `--attendance`, `--chat`, or `--poll`. If the attendance CSV has Zoom start/end/duration metadata, the script reads it automatically. Otherwise pass `--minutes`, and optionally `--start` and `--end`.
+
+When a chat file is included, the ingest script also scans for manual SP review items such as `+3 SP`, `-5 sp`, or `awarded +3 bonus points`. These are added to the admin review queue only; they do not change SP until an admin accepts them.
+
+To scan a chat file without ingesting attendance/polls:
+
+```bash
+npm run scan-chat-sp -- \
+  --label "23 May Morning" \
+  --date 2026-05-23 \
+  --chat data/uploads/2026-05-23/chat_23_May.txt
+```
+
+Admin review flow:
+
+1. Open admin dashboard.
+2. Go to `SP Review`.
+3. Accept rows that should become SP transactions.
+4. Reject warning/noise rows or uncertain matches.
 
 The daily ingestion command creates or updates the session, records attendance/polls/chats, adds missing SP transactions, skips duplicate transactions, and recalculates affected student balances.
 

@@ -2,11 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles.css';
 
-const API = '/api';
+const APP_BASE = window.location.pathname.startsWith('/spurti') ? '/spurti' : '';
+const API = `${APP_BASE}/api`;
 
 function App() {
   const [view, setView] = useState(() => new URLSearchParams(window.location.search).get('admin') === '1' ? 'admin-login' : 'landing');
   const [profile, setProfile] = useState(null);
+  const [excused, setExcused] = useState(null);
   const [admin, setAdmin] = useState(null);
   const [adminAuth, setAdminAuth] = useState(null);
   const [config, setConfig] = useState({ allowStudentSearch: true });
@@ -44,7 +46,12 @@ function App() {
             const data = await meRes.json();
             if (data.authenticated && data.profile && active) {
               setProfile(data.profile);
+              setExcused(null);
               setView('student');
+            } else if (data.authenticated && data.excused && active) {
+              setExcused(data);
+              setProfile(null);
+              setView('excused');
             }
           }
         }
@@ -62,13 +69,26 @@ function App() {
   if (view === 'student' && profile) {
     return <StudentView profile={profile} onBack={config.allowStudentSearch ? () => setView('landing') : null} />;
   }
+  if (view === 'excused' && excused) {
+    return <ExcusedView data={excused} onBack={config.allowStudentSearch ? () => setView('landing') : null} />;
+  }
   if (view === 'admin-login') {
     return <AdminLogin onAdmin={(data, auth) => { setAdmin(data); setAdminAuth(auth); setView('admin'); }} onBack={() => setView('landing')} />;
   }
   if (view === 'admin' && admin && adminAuth) {
     return <AdminView admin={admin} auth={adminAuth} onBack={() => setView('landing')} />;
   }
-  return <Landing config={config} onStudent={(data) => { setProfile(data); setView('student'); }} />;
+  return <Landing config={config} onStudent={(data) => {
+    if (data?.excused) {
+      setExcused(data);
+      setProfile(null);
+      setView('excused');
+      return;
+    }
+    setProfile(data);
+    setExcused(null);
+    setView('student');
+  }} />;
 }
 
 function Landing({ config, onStudent }) {
@@ -140,6 +160,19 @@ function AdminLogin({ onAdmin, onBack }) {
   );
 }
 
+function ExcusedView({ data, onBack }) {
+  return (
+    <main className="page login-page">
+      <section className="panel auth-card">
+        <p className="eyebrow">Spurti Account</p>
+        <h1>{data.student?.name || 'Account excused'}</h1>
+        <p className="lead">{data.message}</p>
+        {onBack && <button className="secondary" onClick={onBack}>Back</button>}
+      </section>
+    </main>
+  );
+}
+
 function adminHeaders(auth) {
   return { 'X-Admin-Email': auth.email, 'X-Admin-Token': auth.token };
 }
@@ -159,6 +192,7 @@ function SearchModal({ onClose, onStudent }) {
     if (query.trim().length < 2) return setMessage('Type at least 2 characters.');
     const res = await fetch(`${API}/search?q=${encodeURIComponent(query.trim())}`);
     const data = await res.json();
+    if (data.excused) return onStudent(data);
     if (data.exact) return onStudent(data.profile);
     setMatches(data.matches || []);
     setMessage(data.matches?.length ? 'Select your record and confirm your email.' : 'No matching student found.');
@@ -423,6 +457,7 @@ function AdminView({ admin, auth, onBack }) {
   const [attendance, setAttendance] = useState(null);
   const [active, setActive] = useState([]);
   const [analytics, setAnalytics] = useState(null);
+  const [spReviews, setSpReviews] = useState([]);
   const [studentProfile, setStudentProfile] = useState(null);
 
   const headers = adminHeaders(auth);
@@ -446,6 +481,22 @@ function AdminView({ admin, auth, onBack }) {
     const res = await fetch(`${API}/admin/analytics`, { headers });
     setAnalytics(await res.json());
   };
+  const loadSpReviews = async () => {
+    const res = await fetch(`${API}/admin/chat-sp-reviews?status=pending`, { headers });
+    setSpReviews(await res.json());
+  };
+  const reviewAction = async (id, action) => {
+    const res = await fetch(`${API}/admin/chat-sp-reviews/${id}/${action}`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.error || 'Review action failed.');
+    }
+    await loadSpReviews();
+  };
 
   useEffect(() => { loadLeaderboard(50); }, []);
   useEffect(() => {
@@ -457,6 +508,7 @@ function AdminView({ admin, auth, onBack }) {
       return () => clearInterval(id);
     }
     if (tab === 'analytics' && !analytics) loadAnalytics();
+    if (tab === 'sp-review' && !spReviews.length) loadSpReviews();
   }, [tab]);
 
   return (
@@ -466,7 +518,7 @@ function AdminView({ admin, auth, onBack }) {
         <div><p className="eyebrow">Admin Dashboard</p><h1>Spurti Control Room</h1></div>
         <div className="score-card"><span>Students</span><strong>{admin.students}</strong><em>{admin.transactions} transactions</em></div>
       </header>
-      <Tabs tab={tab} setTab={setTab} tabs={[['leaderboard','Leaderboard'], ['attendance','Attendance'], ['live','Live'], ['analytics','Analytics']]} />
+      <Tabs tab={tab} setTab={setTab} tabs={[['leaderboard','Leaderboard'], ['attendance','Attendance'], ['sp-review','SP Review'], ['live','Live'], ['analytics','Analytics']]} />
       {tab === 'leaderboard' && (
         <section className="panel">
           <div className="panel-head">
@@ -483,10 +535,45 @@ function AdminView({ admin, auth, onBack }) {
         </section>
       )}
       {tab === 'attendance' && <AdminAttendance data={attendance} onStudent={loadStudent} />}
+      {tab === 'sp-review' && <ChatSPReviewTable reviews={spReviews} onAction={reviewAction} onRefresh={loadSpReviews} />}
       {tab === 'live' && <LiveAnalytics active={active} />}
       {tab === 'analytics' && <Analytics data={analytics} />}
       {studentProfile && <div className="overlay"><section className="modal wide"><div className="modal-head"><h2>{studentProfile.student.name}</h2><button className="icon" onClick={() => setStudentProfile(null)}>x</button></div><SpBank transactions={studentProfile.transactions} /></section></div>}
     </main>
+  );
+}
+
+function ChatSPReviewTable({ reviews, onAction, onRefresh }) {
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <h2>Chat SP Review</h2>
+        <button className="secondary" onClick={onRefresh}>Refresh</button>
+      </div>
+      {!reviews.length ? <p className="empty">No pending chat SP reviews.</p> : (
+        <div className="matrix-wrap">
+          <table className="table review-table">
+            <thead><tr><th>Time</th><th>Student</th><th>SP</th><th>Issued by</th><th>Reason</th><th>Confidence</th><th>Action</th></tr></thead>
+            <tbody>{reviews.map(review => (
+              <tr key={review._id}>
+                <td>{new Date(review.dateTime).toLocaleString()}</td>
+                <td><strong>{review.studentName || 'Unmatched'}</strong><span>{review.studentEmail || 'No email match'}</span></td>
+                <td className={review.delta > 0 ? 'credit' : 'debit'}>{review.delta > 0 ? `+${review.delta}` : review.delta}</td>
+                <td>{review.issuedByName}</td>
+                <td><p>{review.reason}</p><em>{review.evidenceText}</em></td>
+                <td>{review.confidence}</td>
+                <td>
+                  <div className="review-actions">
+                    <button className="primary" disabled={!review.studentEmail} onClick={() => onAction(review._id, 'accept')}>Accept</button>
+                    <button className="secondary" onClick={() => onAction(review._id, 'reject')}>Reject</button>
+                  </div>
+                </td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 
