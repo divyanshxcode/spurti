@@ -1,15 +1,15 @@
-# Adding "See your Spurti Bonus" Button to Samagama Dashboard
+# Adding "My Spurti" Button to Samagama Dashboard
 
 ## Overview
 
-This document describes what needs to be done to add a "See your Spurti Bonus →" button in the Samagama student dashboard. When clicked, the button redirects the logged-in student to their Spurti (Summership SP) dashboard without requiring them to log in again.
+This document describes what needs to be done to add a "My Spurti →" button in the Samagama student dashboard. When clicked, the button redirects the logged-in student to their Spurti (Summership SP) dashboard without requiring them to log in again.
 
 ---
 
 ## Architecture
 
 ```
-Student clicks "See your Spurti Bonus →"
+Student clicks "My Spurti →"
         │
         ▼
 Samagama server generates HMAC-signed token
@@ -116,7 +116,7 @@ app.get('/api/spurti/generate-auth-token', requireAuth, (req, res) => {
 
 **File:** `/var/samagama/web-client/src/SpurtiPointsPanel.jsx`
 
-Modify to add a "See your Spurti Bonus →" link button after the SP chip:
+Modify to add a "My Spurti →" link button after the SP chip:
 
 ```javascript
 // In the return section of SpurtiPointsPanel.jsx
@@ -151,7 +151,7 @@ Modify to add a "See your Spurti Bonus →" link button after the SP chip:
     }
   }}
 >
-  See your Spurti Bonus →
+  My Spurti →
 </a>
 ```
 
@@ -179,7 +179,7 @@ pm2 restart server
 | File | Change |
 |------|--------|
 | `server/server.js` | Read `SPURTI_AUTH_SECRET` from `/home/sakshi/spurti/.env`; add `/api/spurti/generate-auth-token` route |
-| `web-client/src/SpurtiPointsPanel.jsx` | Add "See your Spurti Bonus →" button with fetch-to-new-tab flow |
+| `web-client/src/SpurtiPointsPanel.jsx` | Add "My Spurti →" button with fetch-to-new-tab flow |
 | `web-client/` | `npm run build` to regenerate dist |
 
 ---
@@ -196,7 +196,7 @@ pm2 restart server
 ## Testing
 
 1. Log in to samagama as a student
-2. Find the "See your Spurti Bonus →" button in the dashboard (near Spurti Points panel)
+2. Find the "My Spurti →" button in the dashboard (near Spurti Points panel)
 3. Click it — should open a new tab with the spurti dashboard showing your SP and rank
 4. Verify no email appears in the URL bar
 5. Check spurti's leaderboard matches what you see in the dashboard
