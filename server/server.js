@@ -260,27 +260,43 @@ api.get('/leaderboard', async (_req, res) => {
 });
 
 api.post('/ping', async (req, res) => {
-  const { email, name, page, recordViewed } = req.body || {};
+  const { email, name, page } = req.body || {};
   const normalized = normalizeEmail(email);
   if (!normalized || !name || !page) return res.status(400).json({ error: 'email, name, page required' });
-  await SessionEvent.create({ email: normalized, name, event: 'page_view', page, recordViewed: recordViewed || '' });
-  liveViewers.set(normalized, { name, page, recordViewed: recordViewed || '', lastSeen: new Date() });
+  await SessionEvent.create({ email: normalized, name, event: 'page_view', page });
+  if (page === 'record' || page.startsWith('admin')) {
+    liveViewers.set(normalized, { name, page, lastSeen: new Date() });
+  }
   res.json({ ok: true });
 });
 
 api.get('/admin/stats', adminGuard, async (_req, res) => {
-  const [students, excusedStudents, sessions, txns] = await Promise.all([
-    Student.countDocuments({ status: { $ne: 'excused' } }),
+  const [yetToOnboard, excusedStudents, sessions, txns, activeStudents] = await Promise.all([
+    Student.countDocuments({ status: 'yet to onboard' }),
     Student.countDocuments({ status: 'excused' }),
     Session.find().sort({ endDateTime: 1 }).lean(),
-    SPTransaction.countDocuments()
+    SPTransaction.countDocuments(),
+    Student.countDocuments({ status: 'active' })
   ]);
-  res.json({ students, excusedStudents, sessions, transactions: txns });
+  res.json({ yetToOnboard, excusedStudents, activeStudents, sessions, transactions: txns });
 });
+api.get('/admin/students-by-status', adminGuard, async (req, res) => {
+  const status = String(req.query.status || 'yet to onboard');
+  const limit = Math.min(200, Math.max(1, Number(req.query.limit || 200)));
+  const students = await Student.find({ status }).sort({ name: 1 }).limit(limit).lean();
+  res.json(students.map(s => ({
+    _id: String(s._id),
+    name: s.name,
+    email: s.email,
+    totalSp: s.totalSp,
+    internshipStartDate: s.internshipStartDate
+  })));
+});
+
 
 api.get('/admin/leaderboard', adminGuard, async (req, res) => {
   const limit = Math.min(500, Math.max(1, Number(req.query.limit || 50)));
-  const students = await Student.find({ status: { $ne: 'excused' } }).sort({ totalSp: -1, name: 1 }).limit(limit).lean();
+  const students = await Student.find({ status: 'active' }).sort({ totalSp: -1, name: 1 }).limit(limit).lean();
   res.json(students.map((s, i) => ({
     rank: i + 1,
     _id: String(s._id),
@@ -293,7 +309,7 @@ api.get('/admin/leaderboard', adminGuard, async (req, res) => {
 api.get('/admin/attendance', adminGuard, async (_req, res) => {
   const [sessions, students, records] = await Promise.all([
     Session.find().sort({ endDateTime: 1 }).lean(),
-    Student.find({ status: { $ne: 'excused' } }).sort({ name: 1 }).lean(),
+    Student.find({ status: 'active' }).sort({ name: 1 }).lean(),
     AttendanceRecord.find().lean()
   ]);
   const byStudent = new Map();
@@ -421,14 +437,17 @@ api.get('/admin/analytics', adminGuard, async (_req, res) => {
   const last7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   const last30Days = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-  const [students, sessions, attendance, transactions, events] = await Promise.all([
-    Student.find({ status: { $ne: 'excused' } }).lean(),
+  const [allStudents, sessions, attendance, transactions, events] = await Promise.all([
+    Student.find().lean(),
     Session.find().sort({ endDateTime: 1 }).lean(),
     AttendanceRecord.find().lean(),
     SPTransaction.find().lean(),
     SessionEvent.find({ timestamp: { $gte: last30Days } }).lean()
   ]);
-  const activeEmails = new Set(students.map(student => student.email));
+  const statusCounts = { active: 0, 'yet to onboard': 0, excused: 0 };
+  for (const s of allStudents) { if (s.status in statusCounts) statusCounts[s.status]++; }
+  const activeStudents = allStudents.filter(s => s.status === 'active');
+  const activeEmails = new Set(activeStudents.map(student => student.email));
   const activeAttendance = attendance.filter(row => activeEmails.has(row.email));
   const activeTransactions = transactions.filter(row => activeEmails.has(row.email));
   const activeEvents = events.filter(row => activeEmails.has(row.email));
@@ -457,7 +476,7 @@ api.get('/admin/analytics', adminGuard, async (_req, res) => {
   };
 
   const activeNow = [...liveViewers.values()].filter(v => now.getTime() - v.lastSeen.getTime() <= 60_000).length;
-  const spValues = students.map(s => Number(s.totalSp || 0)).sort((a, b) => a - b);
+  const spValues = activeStudents.map(s => Number(s.totalSp || 0)).sort((a, b) => a - b);
   const avgSp = spValues.length ? Math.round(spValues.reduce((a, b) => a + b, 0) / spValues.length) : 0;
   const medianSp = spValues.length ? spValues[Math.floor(spValues.length / 2)] : 0;
   const spBands = {
@@ -494,8 +513,8 @@ api.get('/admin/analytics', adminGuard, async (_req, res) => {
   });
   const attendanceDebits = activeTransactions.filter(t => t.category === 'attendance' && t.appliedDelta < 0);
   const pollDebits = activeTransactions.filter(t => t.category === 'poll' && t.appliedDelta < 0);
-  const inactiveToday = students.length - new Set(activeEvents.filter(e => e.timestamp >= todayStart).map(e => e.email)).size;
-  const lowSp = students.filter(s => Number(s.totalSp || 0) < 100).length;
+  const inactiveToday = activeStudents.length - new Set(activeEvents.filter(e => e.timestamp >= todayStart).map(e => e.email)).size;
+  const lowSp = activeStudents.filter(s => Number(s.totalSp || 0) < 100).length;
   const topDrops = Object.values(attendanceDebits.concat(pollDebits).reduce((acc, txn) => {
     if (!acc[txn.email]) acc[txn.email] = { email: txn.email, debitCount: 0, debitSp: 0 };
     acc[txn.email].debitCount += 1;
@@ -519,7 +538,8 @@ api.get('/admin/analytics', adminGuard, async (_req, res) => {
       overallQualifiedPct: activeAttendance.length ? Math.round((activeAttendance.filter(a => a.qualified).length / activeAttendance.length) * 100) : 0
     },
     sp: {
-      students: students.length,
+      students: activeStudents.length,
+      statusCounts,
       average: avgSp,
       median: medianSp,
       min: spValues[0] || 0,

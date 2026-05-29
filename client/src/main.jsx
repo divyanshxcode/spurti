@@ -458,9 +458,23 @@ function AdminView({ admin, auth, onBack }) {
   const [active, setActive] = useState([]);
   const [analytics, setAnalytics] = useState(null);
   const [spReviews, setSpReviews] = useState([]);
+  const [stats, setStats] = useState(null);
   const [studentProfile, setStudentProfile] = useState(null);
 
   const headers = adminHeaders(auth);
+
+  // Track admin page views in sessionevents for historical analytics
+  useEffect(() => {
+    if (!auth?.email) return;
+    const doPing = (page) => fetch(`${API}/ping`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: auth.email, name: auth.email, page })
+    }).catch(() => {});
+    doPing('admin-analytics');
+    const id = setInterval(() => doPing('admin-live'), 30000);
+    return () => clearInterval(id);
+  }, [admin]);
   const loadLeaderboard = async (limit = leaderLimit) => {
     const res = await fetch(`${API}/admin/leaderboard?limit=${limit}`, { headers });
     setLeaderboard(await res.json());
@@ -498,7 +512,11 @@ function AdminView({ admin, auth, onBack }) {
     await loadSpReviews();
   };
 
-  useEffect(() => { loadLeaderboard(50); }, []);
+  useEffect(() => { loadLeaderboard(50); fetchStats(); }, []);
+  const fetchStats = async () => {
+    const r = await fetch(`${API}/admin/stats`, headers);
+    if (r.ok) setStats(await r.json());
+  };
   useEffect(() => {
     if (tab === 'attendance' && !attendance) loadAttendance();
     if (tab === 'live') {
@@ -516,9 +534,9 @@ function AdminView({ admin, auth, onBack }) {
       <header className="topbar">
         <button className="secondary" onClick={onBack}>Back</button>
         <div><p className="eyebrow">Admin Dashboard</p><h1>Spurti Control Room</h1></div>
-        <div className="score-card"><span>Students</span><strong>{admin.students}</strong><em>{admin.transactions} transactions</em></div>
+        <div className="score-card"><span>Yet to onboard</span><strong>{stats?.yetToOnboard ?? admin.yetToOnboard ?? 0}</strong><span className="divider">|</span><span>Active</span><strong>{stats?.activeStudents ?? admin.activeStudents ?? admin.students ?? 0}</strong><span className="divider">|</span><span>Excused</span><strong>{stats?.excusedStudents ?? admin.excusedStudents ?? 0}</strong><em>{stats?.transactions ?? admin.transactions ?? 0} txns</em></div>
       </header>
-      <Tabs tab={tab} setTab={setTab} tabs={[['leaderboard','Leaderboard'], ['attendance','Attendance'], ['sp-review','SP Review'], ['live','Live'], ['analytics','Analytics']]} />
+      <Tabs tab={tab} setTab={setTab} tabs={[['leaderboard','Leaderboard'], ['attendance','Attendance'], ['sp-review','SP Review'], ['live','Live'], ['analytics','Analytics'], ['students','Students']]} />
       {tab === 'leaderboard' && (
         <section className="panel">
           <div className="panel-head">
@@ -538,6 +556,7 @@ function AdminView({ admin, auth, onBack }) {
       {tab === 'sp-review' && <ChatSPReviewTable reviews={spReviews} onAction={reviewAction} onRefresh={loadSpReviews} />}
       {tab === 'live' && <LiveAnalytics active={active} />}
       {tab === 'analytics' && <Analytics data={analytics} />}
+      {tab === 'students' && <AllStudentsPanel stats={stats} onStudent={loadStudent} auth={auth} />}
       {studentProfile && <div className="overlay"><section className="modal wide"><div className="modal-head"><h2>{studentProfile.student.name}</h2><button className="icon" onClick={() => setStudentProfile(null)}>x</button></div><SpBank transactions={studentProfile.transactions} /></section></div>}
     </main>
   );
@@ -708,6 +727,46 @@ function Chart({ title, rows, max }) {
           </div>
         )) : <p className="muted">No activity yet.</p>}
       </div>
+    </section>
+  );
+}
+
+
+
+function AllStudentsPanel({ stats, onStudent, auth }) {
+  const [activeTab, setActiveTab] = useState('yetToOnboard');
+  const [list, setList] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const headers = adminHeaders(auth);
+
+  const loadList = async (status) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/admin/students-by-status?status=${status}&limit=200`, headers);
+      if (res.ok) setList(await res.json());
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { loadList(activeTab); }, [activeTab]);
+
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <h2>All Students</h2>
+      </div>
+      <div className="tab-bar">
+        <button className={activeTab === 'yetToOnboard' ? 'active' : ''} onClick={() => { setActiveTab('yetToOnboard'); }}>Yet to Onboard ({stats?.yetToOnboard ?? 0})</button>
+        <button className={activeTab === 'active' ? 'active' : ''} onClick={() => { setActiveTab('active'); }}>Active ({stats?.activeStudents ?? 0})</button>
+        <button className={activeTab === 'excused' ? 'active' : ''} onClick={() => { setActiveTab('excused'); }}>Excused ({stats?.excusedStudents ?? 0})</button>
+      </div>
+      {loading ? <p>Loading...</p> : list.length === 0 ? <p className="empty">No students in this category.</p> : (
+        <table className="table">
+          <thead><tr><th>Name</th><th>Email</th><th>SP</th><th>Start Date</th></tr></thead>
+          <tbody>{list.map(s => <tr key={s._id} onClick={() => onStudent(s._id)} style={{cursor:'pointer'}}><td>{s.name}</td><td>{s.email}</td><td>{s.totalSp}</td><td>{s.internshipStartDate ? new Date(s.internshipStartDate).toLocaleDateString() : '—'}</td></tr>)}</tbody>
+        </table>
+      )}
     </section>
   );
 }
