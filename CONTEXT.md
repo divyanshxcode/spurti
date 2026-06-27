@@ -7,7 +7,7 @@ Spurti is a student engagement tracking app for the VLED Summership program at I
 - **Production:** `https://samagama.in/spurti/`
 - **Dev server:** `cd /Users/sakshivk/sakshigit/spurti && node server/server.js`
 - **Port:** 5003
-- **MongoDB:** `sakshi_spurti` on `127.0.0.1:27017` (auth: sakshi/iitropar, authSource: sakshi_spurti)
+- **MongoDB:** `sakshi_spurti` on `127.0.0.1:27017` (credentials in `.env` `MONGO_URI`, authSource: sakshi_spurti)
 
 ## Key People
 - **Admin/owner:** Rohit (rohit@iitrpr.ac.in) — manages students, SP reviews
@@ -130,7 +130,7 @@ scoring — the `pipeline/` rubric is authoritative. The old Zoom ±5 ingest
 ## Server Info (samagama.in)
 - **SSH:** `ssh sakshi@samagama.in` (Mac SSH key)
 - **SSH path:** `/home/sakshi/spurti` — prod app, port 5003
-- **MongoDB:** `sakshi_spurti` on `127.0.0.1:27017` (auth: sakshi/iitropar, authSource=sakshi_spurti) — **THIS IS THE SOLE SOURCE OF TRUTH**
+- **MongoDB:** `sakshi_spurti` on `127.0.0.1:27017` (credentials in `.env` `MONGO_URI`, authSource=sakshi_spurti) — **THIS IS THE SOLE SOURCE OF TRUTH**
 - **Workspace copy:** `/var/samagama/spurti-workspace/spurti` (NOT active, no longer has separate MongoDB — 27018 instance killed 2026-05-27)
 - **Static client:** served via `static-server.js` on port 5003 alongside Express API
 

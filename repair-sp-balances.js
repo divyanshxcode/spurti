@@ -7,11 +7,13 @@
  * Run once to fix historical imbalances.
  */
 
+import 'dotenv/config';
 import mongoose from 'mongoose';
 import Student from './server/models/Student.js';
 import SPTransaction from './server/models/SPTransaction.js';
 
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://sakshi:iitropar@127.0.0.1:27017/sakshi_spurti?authSource=sakshi_spurti';
+const MONGO_URI = process.env.MONGO_URI;
+if (!MONGO_URI) { console.error('MONGO_URI not set (expected in .env)'); process.exit(1); }
 
 async function repair() {
   await mongoose.connect(MONGO_URI);
