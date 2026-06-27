@@ -8,3 +8,13 @@ dist/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# raw uploaded session data (not source)
+data/uploads/
+
+# editor backups
+*.bak
+*.bak.*
+
+# pipeline secrets — never commit
+pipeline/.env

@@ -75,38 +75,46 @@ status: 'pending' | 'accepted' | 'rejected',
 reviewedBy, reviewedAt, transactionId
 ```
 
-## Key Scripts
+## Architecture — two halves
 
-### ingestSession
-Daily session ingestion — attendance, chat, poll SP, creates ChatSPReview reviews for admin.
-```bash
-npm run ingest-session -- --label "23 May Morning" --date 2026-05-23 \
-  --start 2026-05-23T09:00:00 --end 2026-05-23T11:01:41 --minutes 122 \
-  --attendance data/uploads/2026-05-23/23_May_Attendance.csv \
-  --chat data/uploads/2026-05-23/chat_23_May.txt \
-  --poll data/uploads/2026-05-23/poll_23_May.csv
-```
+1. **Web app (this repo, `server/` + `client/`)** — Express API + React SPA,
+   served live on `127.0.0.1:5003`. Read-only consumer of `sakshi_spurti`.
+2. **SP pipeline (`pipeline/`, deployed at `/var/samagama/server`, runs as the
+   `samagama` user via cron)** — the scoring engine that WRITES `sakshi_spurti`.
+   See `pipeline/README.md` for the full data flow, cron schedule, and rubric.
 
-### syncStudents
-Full roster sync + all sessions. Marks absent students as excused.
-```bash
-npm run sync-students -- path/to/roster.csv
-```
+The two communicate only through the `sakshi_spurti` MongoDB. The web app never
+computes SP; `pipeline/sp-rubric-build.js` is the sole authority.
 
-### rebuild
-Full database rebuild. DELETES and recreates sessions, attendance, polls, chats.
-Modified to SKIP Student delete/insert (students already seeded via seed-students.js).
+## SP Calculation — band/tier rubric (current, 2026-06)
 
-## Data Sources (data/uploads/<date>/)
-- Attendance: Zoom export CSVs
-- Chat: Plain text chat logs
-- Polls: Zoom poll CSVs
+Implemented in `pipeline/sp-rubric-build.js` (NOT in this repo's `server/scripts/`,
+which hold the retired CSV/±5 logic). See `pipeline/README.md` for detail.
 
-## SP Calculation
-- Initial: 100 SP per student
-- Attendance: +5 if ≥75% attendance, -5 otherwise
-- Poll: +1 per attempted question, -1 per missed question
-- Chat: +5/-5 based on sentiment scoring (admin review via ChatSPReview)
+- **Initial:** +100 to every *started intern* on their official start date.
+  Future-start interns are zeroed; non-intern roster entries are set aside.
+- **Attendance (A):** presence clipped to the official window
+  `[09:05 IST, min(first-instance-end, 11:00 IST)]`; `pct = clipped / window`,
+  then banded: **≥90% → +10, 75–89% → +5, 50–74% → +3, <50% → 0**.
+- **Poll (B):** `pct = answered / totalQuestions`, same band ladder (10/5/3/0).
+- **Grace day 2026-06-06:** 1-min join = full attendance + full poll.
+- **Chat / discretionary:** admin-reviewed via ChatSPReview in the web app
+  (absolute or %-of-balance award). Currently dormant (`chatrecords` empty).
+
+> NOTE: session labels are now `Day N (DD Mon)` / `Orientation (15 May)`
+> (produced by the pipeline), NOT the old `"15 May Morning"` form still listed
+> in `server/config.js SESSION_LABELS`. The display path in `server/services/sp.js`
+> iterates the old labels and is out of sync — known issue to reconcile.
+
+## Legacy scripts (`server/scripts/`, superseded by `pipeline/`)
+
+`ingestSession.js`, `rebuild.js`, `syncStudents.js`, `seed.js`, `ingestChat.js`,
+`split22MaySessions.js` are the original CSV-based ±5 pipeline. They remain only
+because `server/server.js` and a few of them still import
+`server/scripts/lib/ingestion.js` (`recalculateStudentSp`). Do not run them for
+scoring — the `pipeline/` rubric is authoritative. The old Zoom ±5 ingest
+(`ingest-zoom-session.js`, `lib/ingestZoomCollections.js`, `lib/ingestZoomLib.js`,
+`run-zoom-ingest.sh`) has been deleted.
 
 ## Admin Endpoints
 - `GET /api/leaderboard` — SP rankings
