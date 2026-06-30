@@ -33,7 +33,7 @@ const stamp = () => new Date().toISOString();
     if (inSheet && !s.surveyCompleted) {
       await col.updateOne({ _id: s._id }, { $set: { surveyCompleted: true, surveyCompletedAt: new Date() } }); setTrue++;
     } else if (!inSheet && s.surveyCompleted) {
-      await col.updateOne({ _id: s._id }, { $set: { surveyCompleted: false } }); reset++;
+      await col.updateOne({ _id: s._id }, { $set: { surveyCompleted: false, surveyCompletedAt: null } }); reset++;
     }
   }
   console.log(stamp(), `sheet-sync: submitted=${subs.size} setTrue=${setTrue} reset=${reset}`);
