@@ -863,6 +863,11 @@ function SquadView({ studentEmail, profile }) {
   const [success, setSuccess] = useState("");
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [leaveError, setLeaveError] = useState("");
+  const [editingName, setEditingName] = useState(false);
+  const [newSquadName, setNewSquadName] = useState("");
+  const [confirmDisband, setConfirmDisband] = useState(false);
+  const [disbandError, setDisbandError] = useState("");
+  const [sentInvites, setSentInvites] = useState([]);
 
   const API = `${window.location.pathname.startsWith("/spurti") ? "/spurti" : ""}/api`;
 
@@ -875,6 +880,7 @@ function SquadView({ studentEmail, profile }) {
       const data = await res.json();
       setSquad(data.squad);
       setPendingInviteCount(data.pendingInviteCount || 0);
+      setSentInvites(data.squad?.sentInvites || []);
     } catch (e) {
       console.error("Failed to load squad", e);
     } finally {
@@ -1000,6 +1006,77 @@ function SquadView({ studentEmail, profile }) {
     } catch (e) { setError("Network error"); }
   }
 
+  async function handleCancelInvite(targetEmail) {
+    setError("");
+    try {
+      const sid = profile?.student?._id;
+      const em = profile?.student?.email;
+      const body = { squadId: squad.id, email: targetEmail };
+      if (sid && em) { body.studentId = sid; body.email = em; }
+      const res = await fetch(`${API}/squad/invites/${squad.id}/cancel`, {
+        method: "POST",
+        credentials: 'same-origin',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error); return; }
+      setSuccess("Invite cancelled");
+      setSentInvites(prev => prev.filter(i => i.email !== targetEmail));
+      setTimeout(() => setSuccess(""), 3000);
+    } catch (e) { setError("Network error"); }
+  }
+
+  async function handleRenameSave() {
+    const trimmed = newSquadName.trim();
+    if (!trimmed || trimmed === squad.name) {
+      setEditingName(false);
+      setNewSquadName(squad.name);
+      return;
+    }
+    setError("");
+    try {
+      const sid = profile?.student?._id;
+      const em = profile?.student?.email;
+      const body = { squadId: squad.id, name: trimmed };
+      if (sid && em) { body.studentId = sid; body.email = em; }
+      const res = await fetch(`${API}/squad/rename`, {
+        method: "POST",
+        credentials: 'same-origin',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error); return; }
+      setSquad(prev => ({ ...prev, name: trimmed }));
+      setEditingName(false);
+      setSuccess("Squad renamed");
+      setTimeout(() => setSuccess(""), 3000);
+    } catch (e) { setError("Network error"); }
+  }
+
+  async function handleDisband() {
+    setDisbandError("");
+    try {
+      const sid = profile?.student?._id;
+      const em = profile?.student?.email;
+      const body = { squadId: squad.id };
+      if (sid && em) { body.studentId = sid; body.email = em; }
+      const res = await fetch(`${API}/squad/disband`, {
+        method: "POST",
+        credentials: 'same-origin',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!res.ok) { setDisbandError(data.error); return; }
+      setSquad(null);
+      setConfirmDisband(false);
+      setSuccess("Squad disbanded");
+      setTimeout(() => setSuccess(""), 3000);
+    } catch (e) { setDisbandError("Network error"); }
+  }
+
   const maxMembers = 5;
   const spotsLeft = squad ? maxMembers - squad.members.length : 0;
 
@@ -1060,10 +1137,30 @@ function SquadView({ studentEmail, profile }) {
         <>
           <div className="squad-header" style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,marginBottom:16}}>
             <div>
-              <h3 style={{margin:0}}>{squad.name}</h3>
+              {editingName ? (
+                <input
+                  type="text"
+                  value={newSquadName}
+                  onChange={e => setNewSquadName(e.target.value)}
+                  onBlur={handleRenameSave}
+                  onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') { setEditingName(false); setNewSquadName(squad.name); } }}
+                  autoFocus
+                  style={{padding:'4px 8px',borderRadius:4,border:'1px solid var(--line)'}}
+                />
+              ) : (
+                <h3 style={{margin:0}}>{squad.name}</h3>
+              )}
               <p className="muted">Squad Level: <strong>{squad.squadLevel}</strong> SP average</p>
             </div>
-            <button className="secondary" onClick={() => setConfirmLeave(true)}>Leave Squad</button>
+            <div style={{display:'flex',gap:8}}>
+              {squad.createdBy === profile?.student?._id && !editingName && (
+                <button className="secondary" onClick={() => { setEditingName(true); setNewSquadName(squad.name); }}>Edit name</button>
+              )}
+              {squad.createdBy === profile?.student?._id && (
+                <button className="secondary" onClick={() => setConfirmDisband(true)}>Disband Squad</button>
+              )}
+              <button className="secondary" onClick={() => setConfirmLeave(true)}>Leave Squad</button>
+            </div>
           </div>
 
           <div className="subpanel">
@@ -1081,6 +1178,17 @@ function SquadView({ studentEmail, profile }) {
               </tbody>
             </table>
           </div>
+          {sentInvites.length > 0 && (
+            <div className="subpanel">
+              <h3>Sent Invites ({sentInvites.length})</h3>
+              {sentInvites.map(inv => (
+                <div key={inv.email} className="invite-row" style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid var(--line)"}}>
+                  <span>{inv.email}</span>
+                  <button className="secondary" style={{color:'var(--red)',borderColor:'var(--red)'}} onClick={() => handleCancelInvite(inv.email)}>Cancel</button>
+                </div>
+              ))}
+            </div>
+          )}
 
           {spotsLeft > 0 && (
             <div className="subpanel">
@@ -1161,6 +1269,20 @@ function SquadView({ studentEmail, profile }) {
                 <div style={{display:"flex",gap:8,marginTop:12}}>
                   <button className="primary" onClick={handleLeave}>Yes, Leave</button>
                   <button className="secondary" onClick={() => { setConfirmLeave(false); setLeaveError(""); }}>Cancel</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {confirmDisband && (
+            <div className="overlay" onClick={() => { setConfirmDisband(false); setDisbandError(""); }}>
+              <div className="modal" onClick={e => e.stopPropagation()}>
+                <h3>Disband Squad?</h3>
+                <p>This will permanently remove all members and delete <strong>{squad.name}</strong>. This cannot be undone.</p>
+                {disbandError && <p className="error" style={{marginTop:8}}>{disbandError}</p>}
+                <div style={{display:"flex",gap:8,marginTop:12}}>
+                  <button className="primary" style={{background:'var(--red)'}} onClick={handleDisband}>Disband</button>
+                  <button className="secondary" onClick={() => { setConfirmDisband(false); setDisbandError(""); }}>Cancel</button>
                 </div>
               </div>
             </div>

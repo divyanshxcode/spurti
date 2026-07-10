@@ -727,15 +727,22 @@ api.get('/squad/my', async (req, res) => {
     };
   }
 
+  const currentUserName = student.name;
+  const sentInvites = squad.pendingInvites
+    .filter(i => i.invitedBy === currentUserName)
+    .map(i => ({ email: i.email, invitedAt: i.invitedAt }));
+
   res.json({
     squad: {
       id: squad._id,
       name: squad.name,
+      createdBy: String(squad.createdBy),
       members,
       squadLevel,
       challengeLockedUntil: squad.challengeLockedUntil,
       challengeHistory: squad.challengeHistory,
-      challengeStatus
+      challengeStatus,
+      sentInvites
     },
     pendingInviteCount
   });
@@ -767,6 +774,7 @@ api.post('/squad/create', async (req, res) => {
     squad: {
       id: squad._id,
       name: squad.name,
+      createdBy: String(squad.createdBy),
       members: [{ name: student.name, maskedEmail: maskEmail(student.email), totalSp: student.totalSp, isCurrentUser: true, joinedAt: squad.members[0].joinedAt }],
       squadLevel: student.totalSp,
       challengeLockedUntil: squad.challengeLockedUntil,
@@ -896,6 +904,66 @@ api.post('/squad/leave', async (req, res) => {
     await squad.save();
   }
 
+  res.json({ ok: true });
+});
+
+// Cancel a pending invite (sender-only)
+api.post('/squad/invites/:squadId/cancel', async (req, res) => {
+  const email = await squadEmail(req);
+  if (!email) return res.status(401).json({ error: 'Unauthorized' });
+  const { squadId } = req.params;
+  const { email: targetEmail } = req.body || {};
+  if (!targetEmail) return res.status(400).json({ error: 'Email is required' });
+  const squad = await Squad.findById(squadId);
+  if (!squad) return res.status(404).json({ error: 'Squad not found' });
+  const student = await Student.findOne({ email }).lean();
+  if (!student) return res.status(404).json({ error: 'Student not found' });
+  const isMember = squad.members.some(m => m.studentId.toString() === String(student._id));
+  if (!isMember) return res.status(403).json({ error: 'Not a squad member' });
+  const inviteIndex = squad.pendingInvites.findIndex(i => normalizeEmail(i.email) === normalizeEmail(targetEmail));
+  if (inviteIndex === -1) return res.status(404).json({ error: 'Invite not found' });
+  if (squad.pendingInvites[inviteIndex].invitedBy !== student.name) {
+    return res.status(403).json({ error: 'You did not send this invite' });
+  }
+  squad.pendingInvites.splice(inviteIndex, 1);
+  await squad.save();
+  res.json({ ok: true });
+});
+
+// Rename squad (creator-only)
+api.post('/squad/rename', async (req, res) => {
+  const email = await squadEmail(req);
+  if (!email) return res.status(401).json({ error: 'Unauthorized' });
+  const { squadId, name } = req.body || {};
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required' });
+  const squad = await Squad.findById(squadId);
+  if (!squad) return res.status(404).json({ error: 'Squad not found' });
+  const student = await Student.findOne({ email }).lean();
+  if (!student) return res.status(404).json({ error: 'Student not found' });
+  if (squad.createdBy.toString() !== String(student._id)) {
+    return res.status(403).json({ error: 'Only the creator can rename the squad' });
+  }
+  squad.name = name.trim();
+  await squad.save();
+  res.json({ ok: true, name: squad.name });
+});
+
+// Disband squad (creator-only)
+api.post('/squad/disband', async (req, res) => {
+  const email = await squadEmail(req);
+  if (!email) return res.status(401).json({ error: 'Unauthorized' });
+  const { squadId } = req.body || {};
+  if (!squadId) return res.status(400).json({ error: 'squadId is required' });
+  const squad = await Squad.findById(squadId);
+  if (!squad) return res.status(404).json({ error: 'Squad not found' });
+  const student = await Student.findOne({ email }).lean();
+  if (!student) return res.status(404).json({ error: 'Student not found' });
+  if (squad.createdBy.toString() !== String(student._id)) {
+    return res.status(403).json({ error: 'Only the creator can disband the squad' });
+  }
+  const memberIds = squad.members.map(m => m.studentId);
+  await Student.updateMany({ _id: { $in: memberIds } }, { $set: { squadId: null } });
+  await Squad.deleteOne({ _id: squadId });
   res.json({ ok: true });
 });
 
