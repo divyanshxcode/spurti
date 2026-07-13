@@ -989,6 +989,7 @@ api.post('/squad/leave', async (req, res) => {
     return res.status(400).json({ error: 'Cannot leave during active challenge' });
   }
 
+  const wasCreator = String(squad.createdBy) === String(student._id);
   squad.members = squad.members.filter(m => m.email !== email);
   student.squadId = null;
   await student.save();
@@ -996,13 +997,16 @@ api.post('/squad/leave', async (req, res) => {
   if (squad.members.length === 0) {
     await Squad.deleteOne({ _id: squad._id });
   } else {
+    if (wasCreator) {
+      squad.createdBy = squad.members[0].studentId;
+    }
     await squad.save();
   }
 
   res.json({ ok: true });
 });
 
-// Cancel a pending invite (sender-only)
+// Cancel a pending invite (any squad member)
 api.post('/squad/invites/:squadId/cancel', async (req, res) => {
   const email = await squadEmail(req);
   if (!email) return res.status(401).json({ error: 'Unauthorized' });
@@ -1017,15 +1021,12 @@ api.post('/squad/invites/:squadId/cancel', async (req, res) => {
   if (!isMember) return res.status(403).json({ error: 'Not a squad member' });
   const inviteIndex = squad.pendingInvites.findIndex(i => normalizeEmail(i.email) === normalizeEmail(targetEmail));
   if (inviteIndex === -1) return res.status(404).json({ error: 'Invite not found' });
-  if (squad.pendingInvites[inviteIndex].invitedBy !== student.name) {
-    return res.status(403).json({ error: 'You did not send this invite' });
-  }
   squad.pendingInvites.splice(inviteIndex, 1);
   await squad.save();
   res.json({ ok: true });
 });
 
-// Rename squad (creator-only)
+// Rename squad (any member)
 api.post('/squad/rename', async (req, res) => {
   const email = await squadEmail(req);
   if (!email) return res.status(401).json({ error: 'Unauthorized' });
@@ -1035,31 +1036,11 @@ api.post('/squad/rename', async (req, res) => {
   if (!squad) return res.status(404).json({ error: 'Squad not found' });
   const student = await Student.findOne({ email }).lean();
   if (!student) return res.status(404).json({ error: 'Student not found' });
-  if (squad.createdBy.toString() !== String(student._id)) {
-    return res.status(403).json({ error: 'Only the creator can rename the squad' });
-  }
+  const isMember = squad.members.some(m => m.studentId.toString() === String(student._id));
+  if (!isMember) return res.status(403).json({ error: 'Not a squad member' });
   squad.name = name.trim();
   await squad.save();
   res.json({ ok: true, name: squad.name });
-});
-
-// Disband squad (creator-only)
-api.post('/squad/disband', async (req, res) => {
-  const email = await squadEmail(req);
-  if (!email) return res.status(401).json({ error: 'Unauthorized' });
-  const { squadId } = req.body || {};
-  if (!squadId) return res.status(400).json({ error: 'squadId is required' });
-  const squad = await Squad.findById(squadId);
-  if (!squad) return res.status(404).json({ error: 'Squad not found' });
-  const student = await Student.findOne({ email }).lean();
-  if (!student) return res.status(404).json({ error: 'Student not found' });
-  if (squad.createdBy.toString() !== String(student._id)) {
-    return res.status(403).json({ error: 'Only the creator can disband the squad' });
-  }
-  const memberIds = squad.members.map(m => m.studentId);
-  await Student.updateMany({ _id: { $in: memberIds } }, { $set: { squadId: null } });
-  await Squad.deleteOne({ _id: squadId });
-  res.json({ ok: true });
 });
 
 api.post('/squad/resolve-challenges', async (req, res) => {

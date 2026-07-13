@@ -865,8 +865,7 @@ function ChallengesView({ studentEmail, profile }) {
   const [leaveError, setLeaveError] = useState("");
   const [editingName, setEditingName] = useState(false);
   const [newSquadName, setNewSquadName] = useState("");
-  const [confirmDisband, setConfirmDisband] = useState(false);
-  const [disbandError, setDisbandError] = useState("");
+
 
   const API = `${window.location.pathname.startsWith("/spurti") ? "/spurti" : ""}/api`;
 
@@ -1060,26 +1059,6 @@ function ChallengesView({ studentEmail, profile }) {
     } catch (e) { setError("Network error"); }
   }
 
-  async function handleDisband() {
-    setDisbandError("");
-    try {
-      const sid = profile?.student?._id;
-      const em = profile?.student?.email;
-      const body = { squadId: squad.id };
-      if (sid && em) { body.studentId = sid; body.email = em; }
-      const res = await fetch(`${API}/squad/disband`, {
-        method: "POST", credentials: 'same-origin',
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-      });
-      const data = await res.json();
-      if (!res.ok) { setDisbandError(data.error); return; }
-      setSquad(null);
-      setConfirmDisband(false);
-      setSuccess("Squad disbanded");
-      setTimeout(() => setSuccess(""), 3000);
-    } catch (e) { setDisbandError("Network error"); }
-  }
 
   const maxMembers = 5;
   const spotsLeft = squad ? maxMembers - squad.members.length : 0;
@@ -1093,166 +1072,184 @@ function ChallengesView({ studentEmail, profile }) {
     );
   }
 
-  function StatusBadge({ active, label, color }) {
-    return (
-      <span style={{
-        display: "inline-flex", alignItems: "center", gap: 4,
-        padding: "3px 10px", borderRadius: 12, fontSize: "0.8em", fontWeight: 600,
-        background: color || (active ? "#e8f5e9" : "#f5f5f5"),
-        color: color || (active ? "var(--green)" : "var(--muted)")
-      }}>
-        <span>{active ? "\u25CF" : "\u25CB"}</span>
-        {label || (active ? "Active" : "Not Enrolled")}
-      </span>
-    );
-  }
 
   if (loading) return <section className="panel"><p className="muted">Loading challenges...</p></section>;
 
   return (
     <section className="panel">
-      {error && <p className="error">{error}</p>}
-      {success && <p className="success">{success}</p>}
       <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
 
         {/* ── MAIN COLUMN ── */}
         <div style={{ flex: 1, minWidth: 0 }}>
 
           {/* ── Squad Perfect Week Card ── */}
-          <div className="subpanel" style={{ marginBottom: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: "1.4em" }}>👥</span>
-                <h3 style={{ margin: 0 }}>Squad Perfect Week</h3>
+          <div style={{ borderRadius: 10, background: "#fff", border: "1px solid var(--line)", overflow: "hidden", marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+            <div style={{ height: 4, background: "linear-gradient(90deg, #4a90d9, #7bb3e0)" }} />
+            <div style={{ padding: 18 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: "1.6em" }}>👥</span>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: "1.1em" }}>Squad Perfect Week</h3>
+                    <p className="muted" style={{ margin: 0, fontSize: "0.8em" }}>Co-op challenge with your squad</p>
+                  </div>
+                </div>
+                {squad ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 12px", borderRadius: 20, fontSize: "0.8em", fontWeight: 600, background: "#e3f2fd", color: "#1565c0" }}>
+                    <span style={{ fontSize: "0.6em" }}>●</span> Enrolled
+                  </span>
+                ) : (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 12px", borderRadius: 20, fontSize: "0.8em", fontWeight: 600, background: "#f5f5f5", color: "#9e9e9e" }}>
+                    <span style={{ fontSize: "0.6em" }}>○</span> Not Enrolled
+                  </span>
+                )}
               </div>
-              {squad ? (
-                <StatusBadge active label="Enrolled" color="#e8f5e9" />
+              <p style={{ fontSize: "0.88em", color: "#555", marginBottom: 14, lineHeight: 1.5 }}>
+                All squad members must attend every session this week for a <strong style={{ color: "#1565c0" }}>1.1x SP boost</strong> for everyone!
+              </p>
+
+              {!squad ? (
+                <div>
+                  <p style={{ fontSize: "0.85em", color: "#888", marginBottom: 12, lineHeight: 1.4 }}>
+                    {invites.length > 0 ? "You have pending invites. Check your sidebar or create your own squad." : "Create a squad and invite friends to unlock this challenge."}
+                  </p>
+                  <button className="primary" onClick={() => setShowCreate(true)} style={{ background: "#4a90d9", border: "none", padding: "8px 20px", borderRadius: 8, color: "#fff", fontWeight: 600, cursor: "pointer" }}>Create Squad</button>
+                </div>
               ) : (
-                <StatusBadge active={false} label="Not Enrolled" />
+                <>
+                  {squad.challengeStatus && squad.challengeStatus.sessions.length > 0 ? (
+                    <>
+                      <p style={{ fontWeight: 600, fontSize: "0.9em", marginBottom: 10, color: "#333" }}>This Week's Progress</p>
+                      {squad.challengeStatus.sessions.map(s => (
+                        <div key={s.label} style={{ marginBottom: 10, padding: "8px 10px", background: "#f8f9fa", borderRadius: 8 }}>
+                          <p style={{ fontSize: "0.82em", fontWeight: 600, marginBottom: 6, color: "#555" }}>{s.label}</p>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                            {s.memberAttendance.map((m, i) => (
+                              <span key={i} style={{
+                                padding: "3px 10px", borderRadius: 6, fontSize: "0.82em", fontWeight: 500,
+                                background: m.qualified === true ? "#e8f5e9" : m.qualified === false ? "#ffebee" : "#eef2f7",
+                                color: m.qualified === true ? "#2e7d32" : m.qualified === false ? "#c62828" : "#9e9e9e"
+                              }}>
+                                {m.name}: {m.qualified === true ? "\u2713" : m.qualified === false ? "\u2717" : "\u2014"}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <div style={{ padding: "12px 14px", background: "#fff8e1", borderRadius: 8, fontSize: "0.85em", color: "#f57f17", lineHeight: 1.4 }}>
+                      <span style={{ fontWeight: 600 }}>⏳ Waiting for sessions</span><br />
+                      {squad.challengeLockedUntil && new Date(squad.challengeLockedUntil) > new Date()
+                        ? "Challenge locks next Monday. Squad is ready!"
+                        : "No sessions scheduled this week. The challenge will activate when sessions begin."}
+                    </div>
+                  )}
+                </>
               )}
             </div>
-            <p className="muted" style={{ marginBottom: 8 }}>
-              All squad members must attend every session this week for a <strong>1.1x SP boost</strong> for everyone!
-            </p>
-
-            {!squad ? (
-              <div>
-                <p className="muted" style={{ fontSize: "0.9em", marginBottom: 12 }}>
-                  {invites.length > 0 ? "You have pending invites. Check your sidebar or create your own squad." : "Create a squad and invite friends to unlock this challenge."}
-                </p>
-                <button className="primary" onClick={() => setShowCreate(true)}>Create Squad</button>
-              </div>
-            ) : (
-              <>
-                {squad.challengeStatus && squad.challengeStatus.sessions.length > 0 ? (
-                  <>
-                    <p style={{ fontWeight: 600, fontSize: "0.9em", marginBottom: 8 }}>This Week\u2019s Progress</p>
-                    {squad.challengeStatus.sessions.map(s => (
-                      <div key={s.label} style={{ marginBottom: 8 }}>
-                        <p style={{ fontSize: "0.85em", fontWeight: 600, marginBottom: 4 }}>{s.label}</p>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                          {s.memberAttendance.map((m, i) => (
-                            <span key={i} style={{
-                              padding: "2px 8px", borderRadius: 4, fontSize: "0.85em",
-                              background: m.qualified === true ? "var(--green)" : m.qualified === false ? "var(--red)" : "#eef2f7",
-                              color: m.qualified != null ? "#fff" : "var(--muted)"
-                            }}>
-                              {m.name}: {m.qualified === true ? "\u2705" : m.qualified === false ? "\u274C" : "\u2014"}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </>
-                ) : (
-                  <p className="muted" style={{ fontSize: "0.9em" }}>
-                    {squad.challengeLockedUntil && new Date(squad.challengeLockedUntil) > new Date()
-                      ? "Challenge locks next Monday. Squad is ready!"
-                      : "No sessions scheduled this week. The challenge will activate when sessions begin."}
-                  </p>
-                )}
-                {squad.challengeStatus && squad.challengeStatus.sessions.length === 0 && squad.challengeLockedUntil && new Date(squad.challengeLockedUntil) > new Date() && (
-                  <p className="muted" style={{ fontSize: "0.9em" }}>
-                    Locked until {new Date(squad.challengeLockedUntil).toLocaleDateString()}
-                  </p>
-                )}
-              </>
-            )}
           </div>
 
           {/* ── Individual Perfect Week Card ── */}
-          <div className="subpanel" style={{ marginBottom: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: "1.4em" }}>⭐</span>
-                <h3 style={{ margin: 0 }}>Perfect Week</h3>
+          <div style={{ borderRadius: 10, background: "#fff", border: "1px solid var(--line)", overflow: "hidden", marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+            <div style={{ height: 4, background: "linear-gradient(90deg, #9b59b6, #c39bd3)" }} />
+            <div style={{ padding: 18 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: "1.6em" }}>⭐</span>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: "1.1em" }}>Perfect Week</h3>
+                    <p className="muted" style={{ margin: 0, fontSize: "0.8em" }}>Individual attendance challenge</p>
+                  </div>
+                </div>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 12px", borderRadius: 20, fontSize: "0.8em", fontWeight: 600, background: "#f3e5f5", color: "#7b1fa2" }}>
+                  <span style={{ fontSize: "0.6em" }}>●</span> Active
+                </span>
               </div>
-              <StatusBadge active label="Active" />
+              <p style={{ fontSize: "0.88em", color: "#555", marginBottom: 14, lineHeight: 1.5 }}>
+                Attend every session this week. Consistency pays off!
+              </p>
+              {cp && cp.individualPerfectWeek.total > 0 ? (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                    <span style={{ fontWeight: 600, fontSize: "1em" }}>
+                      <span style={{ color: cp.individualPerfectWeek.allQualified ? "#2e7d32" : "#f57f17" }}>{cp.individualPerfectWeek.attended}</span>
+                      <span style={{ color: "#999" }}>/{cp.individualPerfectWeek.total}</span> sessions
+                    </span>
+                    <span style={{ fontWeight: 700, fontSize: "1.1em", color: cp.individualPerfectWeek.allQualified ? "#2e7d32" : "#f57f17" }}>
+                      {Math.round(cp.individualPerfectWeek.attended / cp.individualPerfectWeek.total * 100)}%
+                    </span>
+                  </div>
+                  <ProgressBar pct={(cp.individualPerfectWeek.attended / cp.individualPerfectWeek.total) * 100} color={cp.individualPerfectWeek.allQualified ? "#2e7d32" : "#f57f17"} />
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                    {cp.currentWeekSessions.map(s => {
+                      const att = cp.myAttendance[s.label];
+                      const q = att?.qualified;
+                      return (
+                        <span key={s.label} style={{
+                          padding: "4px 12px", borderRadius: 20, fontSize: "0.82em", fontWeight: 500,
+                          background: q === true ? "#e8f5e9" : q === false ? "#ffebee" : "#f5f5f5",
+                          color: q === true ? "#2e7d32" : q === false ? "#c62828" : "#9e9e9e",
+                          border: q === true ? "1px solid #a5d6a7" : q === false ? "1px solid #ef9a9a" : "1px solid #e0e0e0"
+                        }}>
+                          {q === true ? "\u2713" : q === false ? "\u2717" : "\u23F3"} {s.label}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <div style={{ padding: "12px 14px", background: "#f3e5f5", borderRadius: 8, fontSize: "0.85em", color: "#7b1fa2", lineHeight: 1.4 }}>
+                  No sessions scheduled this week. Check back when sessions start!
+                </div>
+              )}
             </div>
-            <p className="muted" style={{ marginBottom: 8 }}>
-              Attend every session this week. Consistency pays off!
-            </p>
-            {cp && cp.individualPerfectWeek.total > 0 ? (
-              <>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                  <span style={{ fontWeight: 600, fontSize: "0.95em" }}>
-                    {cp.individualPerfectWeek.attended}/{cp.individualPerfectWeek.total} sessions
-                  </span>
-                  <span style={{ fontWeight: 700, fontSize: "1em", color: cp.individualPerfectWeek.allQualified ? "var(--green)" : "var(--muted)" }}>
-                    {Math.round(cp.individualPerfectWeek.attended / cp.individualPerfectWeek.total * 100)}%
-                  </span>
-                </div>
-                <ProgressBar pct={(cp.individualPerfectWeek.attended / cp.individualPerfectWeek.total) * 100} color={cp.individualPerfectWeek.allQualified ? "var(--green)" : "#ff9800"} />
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
-                  {cp.currentWeekSessions.map(s => {
-                    const att = cp.myAttendance[s.label];
-                    const q = att?.qualified;
-                    return (
-                      <span key={s.label} style={{
-                        padding: "2px 10px", borderRadius: 12, fontSize: "0.85em",
-                        background: q === true ? "#e8f5e9" : q === false ? "#ffebee" : "#f5f5f5",
-                        color: q === true ? "var(--green)" : q === false ? "var(--red)" : "var(--muted)"
-                      }}>
-                        {q === true ? "\u2705" : q === false ? "\u274C" : "\u23F3"} {s.label}
-                      </span>
-                    );
-                  })}
-                </div>
-              </>
-            ) : (
-              <p className="muted" style={{ fontSize: "0.9em" }}>No sessions scheduled this week. Check back when sessions start!</p>
-            )}
           </div>
 
           {/* ── Attendance Streak Card ── */}
-          <div className="subpanel" style={{ marginBottom: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: "1.4em" }}>🔥</span>
-                <h3 style={{ margin: 0 }}>Attendance Streak</h3>
-              </div>
-              <StatusBadge active label="Active" />
-            </div>
-            <p className="muted" style={{ marginBottom: 8 }}>
-              Consecutive qualified sessions. Don\u2019t break the chain!
-            </p>
-            {cp && (
-              <>
-                <div style={{ display: "flex", gap: 24, marginBottom: 4 }}>
+          <div style={{ borderRadius: 10, background: "#fff", border: "1px solid var(--line)", overflow: "hidden", marginBottom: 16, boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+            <div style={{ height: 4, background: "linear-gradient(90deg, #ff9800, #ffb74d)" }} />
+            <div style={{ padding: 18 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: "1.6em" }}>🔥</span>
                   <div>
-                    <span style={{ fontSize: "1.3em", fontWeight: 700, color: "var(--green)" }}>{cp.attendanceStreak.current}</span>
-                    <span className="muted" style={{ fontSize: "0.85em", marginLeft: 4 }}>Current</span>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: "1.3em", fontWeight: 700, color: "var(--muted)" }}>{cp.attendanceStreak.longest}</span>
-                    <span className="muted" style={{ fontSize: "0.85em", marginLeft: 4 }}>Best</span>
+                    <h3 style={{ margin: 0, fontSize: "1.1em" }}>Attendance Streak</h3>
+                    <p className="muted" style={{ margin: 0, fontSize: "0.8em" }}>Consecutive qualified sessions</p>
                   </div>
                 </div>
-                {cp.attendanceStreak.longest > 0 && (
-                  <ProgressBar pct={(cp.attendanceStreak.current / cp.attendanceStreak.longest) * 100} color={cp.attendanceStreak.current >= cp.attendanceStreak.longest ? "var(--green)" : "#ff9800"} />
-                )}
-              </>
-            )}
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 12px", borderRadius: 20, fontSize: "0.8em", fontWeight: 600, background: "#fff3e0", color: "#e65100" }}>
+                  <span style={{ fontSize: "0.6em" }}>●</span> Active
+                </span>
+              </div>
+              <p style={{ fontSize: "0.88em", color: "#555", marginBottom: 14, lineHeight: 1.5 }}>
+                Consecutive qualified sessions. Don't break the chain!
+              </p>
+              {cp && (
+                <>
+                  <div style={{ display: "flex", gap: 32, marginBottom: 10, alignItems: "baseline" }}>
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: "2em", fontWeight: 700, color: "#e65100", lineHeight: 1 }}>{cp.attendanceStreak.current}</div>
+                      <div style={{ fontSize: "0.8em", color: "#999", marginTop: 2 }}>Current</div>
+                    </div>
+                    <div style={{ width: 1, height: 40, background: "#e0e0e0" }} />
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: "2em", fontWeight: 700, color: "#bbb", lineHeight: 1 }}>{cp.attendanceStreak.longest}</div>
+                      <div style={{ fontSize: "0.8em", color: "#999", marginTop: 2 }}>Best</div>
+                    </div>
+                  </div>
+                  {cp.attendanceStreak.longest > 0 && (
+                    <div>
+                      <ProgressBar pct={(cp.attendanceStreak.current / cp.attendanceStreak.longest) * 100} color={cp.attendanceStreak.current >= cp.attendanceStreak.longest ? "#2e7d32" : "#ff9800"} />
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.78em", color: "#999", marginTop: 2 }}>
+                        <span>0</span>
+                        <span>{cp.attendanceStreak.longest}</span>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1280,7 +1277,7 @@ function ChallengesView({ studentEmail, profile }) {
                     </>
                   )}
                 </div>
-                {squad.createdBy === profile?.student?._id && !editingName && (
+                {!editingName && (
                   <button className="secondary" style={{ fontSize: "0.8em", padding: "2px 8px", flexShrink: 0 }} onClick={() => { setEditingName(true); setNewSquadName(squad.name); }}>Edit</button>
                 )}
               </div>
@@ -1341,11 +1338,8 @@ function ChallengesView({ studentEmail, profile }) {
               )}
 
               {/* Actions */}
-              <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-                <button className="secondary" style={{ fontSize: "0.85em", flex: 1 }} onClick={() => setConfirmLeave(true)}>Leave Squad</button>
-                {squad.createdBy === profile?.student?._id && (
-                  <button className="secondary" style={{ fontSize: "0.85em", flex: 1 }} onClick={() => setConfirmDisband(true)}>Disband</button>
-                )}
+              <div style={{ marginBottom: 16 }}>
+                <button className="secondary" style={{ fontSize: "0.85em", width: "100%" }} onClick={() => setConfirmLeave(true)}>Leave Squad</button>
               </div>
 
               {/* Challenge History */}
@@ -1388,6 +1382,16 @@ function ChallengesView({ studentEmail, profile }) {
               </p>
             </div>
           )}
+          {error && (
+            <div style={{ background: "#ffebee", color: "#c62828", border: "1px solid #ef9a9a", padding: "10px 14px", borderRadius: 8, fontSize: "0.85em", marginBottom: 12, fontWeight: 600 }}>
+              {error}
+            </div>
+          )}
+          {success && (
+            <div style={{ background: "#e8f5e9", color: "#2e7d32", border: "1px solid #a5d6a7", padding: "10px 14px", borderRadius: 8, fontSize: "0.85em", marginBottom: 12, fontWeight: 600 }}>
+              {success}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1426,20 +1430,7 @@ function ChallengesView({ studentEmail, profile }) {
         </div>
       )}
 
-      {/* ── Disband Confirmation Modal ── */}
-      {confirmDisband && (
-        <div className="overlay" onClick={() => { setConfirmDisband(false); setDisbandError(""); }}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <h3>Disband Squad?</h3>
-            <p>This will permanently remove all members and delete <strong>{squad?.name}</strong>. This cannot be undone.</p>
-            {disbandError && <p className="error" style={{ marginTop: 8 }}>{disbandError}</p>}
-            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button className="primary" style={{ background: "var(--red)" }} onClick={handleDisband}>Disband</button>
-              <button className="secondary" onClick={() => { setConfirmDisband(false); setDisbandError(""); }}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
+
     </section>
   );
 }
