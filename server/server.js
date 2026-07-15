@@ -985,10 +985,6 @@ api.post('/squad/leave', async (req, res) => {
   const squad = await Squad.findById(student.squadId);
   if (!squad) return res.status(400).json({ error: 'Squad not found' });
 
-  if (squad.challengeLockedUntil && squad.challengeLockedUntil > new Date()) {
-    return res.status(400).json({ error: 'Cannot leave during active challenge' });
-  }
-
   const wasCreator = String(squad.createdBy) === String(student._id);
   squad.members = squad.members.filter(m => m.email !== email);
   student.squadId = null;
